@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Michaelis-Menten Kinetics Simulation</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .control-group {
+            margin-bottom: 10px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        canvas {
+            border: 1px solid #ccc;
+            display: block;
+            margin: 0 auto;
+            background-color: #ffffff;
+        }
+        
+        button {
+            padding: 8px 15px;
+            margin: 5px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        button:hover {
+            background-color: #45a049;
+        }
+        
+        button.stop {
+            background-color: #f44336;
+        }
+        
+        button.stop:hover {
+            background-color: #d32f2f;
+        }
+        
+        .stats-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        
+        .stats-table th, .stats-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: center;
+        }
+        
+        .stats-table th {
+            background-color: #f2f2f2;
+        }
+        
+        .slider-container {
+            display: flex;
+            align-items: center;
+        }
+        
+        .slider-value {
+            margin-left: 10px;
+            min-width: 30px;
+        }
+        
+        #dotCount {
+            width: 200px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Michaelis-Menten Kinetics Simulation</h1>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label for="dotCount">Substrate Concentration (dots):</label>
+                <div class="slider-container">
+                    <input type="range" id="dotCount" min="10" max="200" value="50">
+                    <span id="dotCountValue" class="slider-value">50</span>
+                </div>
+            </div>
+            
+            <div class="control-group">
+                <button id="startBtn">Start</button>
+                <button id="stopBtn" class="stop">Stop</button>
+                <button id="resetBtn">Reset</button>
+            </div>
+        </div>
+        
+        <canvas id="simulationCanvas" width="800" height="600"></canvas>
+        
+        <table id="statsTable" class="stats-table" style="display: none;">
+            <thead>
+                <tr>
+                    <th>Enzyme Mitt</th>
+                    <th>Stickiness</th>
+                    <th>Time Survived (s)</th>
+                    <th>Dots Metabolized</th>
+                </tr>
+            </thead>
+            <tbody id="statsBody">
+                <!-- Stats will be populated here -->
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // Canvas setup
+        const canvas = document.getElementById('simulationCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Control elements
+        const dotCountSlider = document.getElementById('dotCount');
+        const dotCountValue = document.getElementById('dotCountValue');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const statsTable = document.getElementById('statsTable');
+        const statsBody = document.getElementById('statsBody');
+        
+        // Simulation parameters
+        const numMitts = 4;
+        const mittWidth = 60;
+        const mittHeight = 40;
+        const passagewayHeight = 80;
+        const cellRadius = 30;
+        const dotRadius = 5;
+        
+        // Simulation state
+        let dots = [];
+        let mitts = [];
+        let cells = [];
+        let animationId = null;
+        let isRunning = false;
+        let startTime = null;
+        let currentTime = 0;
+        
+        // Initialize the simulation
+        function initSimulation() {
+            dots = [];
+            mitts = [];
+            cells = [];
+            currentTime = 0;
+            
+            // Create mitts with increasing stickiness (left to right)
+            const mittSpacing = (canvas.width - numMitts * mittWidth) / (numMitts + 1);
+            for (let i = 0; i < numMitts; i++) {
+                const x = mittSpacing + i * (mittWidth + mittSpacing);
+                const y = 150; // Fixed Y position for mitts
+                
+                // Stickiness increases from left to right (lower Km values)
+                const stickiness = 0.2 + (i * 0.2); // Range: 0.2 to 0.8
+                
+                mitts.push({
+                    x: x,
+                    y: y,
+                    width: mittWidth,
+                    height: mittHeight,
+                    stickiness: stickiness,
+                    caughtDots: 0,
+                    startTime: null,
+                    timeSurvived: 0
+                });
+                
+                // Create corresponding cells beneath each mitt
+                cells.push({
+                    x: x + mittWidth/2,
+                    y: y + mittHeight + passagewayHeight + cellRadius,
+                    radius: cellRadius,
+                    health: 100, // 0-100 scale
+                    lastFedTime: 0,
+                    isAlive: true
+                });
+            }
+            
+            // Create initial dots
+            createDots(dotCountSlider.value);
+            
+            // Reset stats table
+            statsTable.style.display = 'none';
+            statsBody.innerHTML = '';
+        }
+        
+        // Create dots based on current count
+        function createDots(count) {
+            dots = [];
+            for (let i = 0; i < count; i++) {
+                dots.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * 100, // Top section
+                    vx: (Math.random() - 0.5) * 2,
+                    vy: (Math.random() - 0.5) * 2,
+                    radius: dotRadius,
+                    isCaught: false,
+                    caughtBy: null,
+                    inPassageway: false,
+                    passagewayProgress: 0
+                });
+            }
+        }
+        
+        // Update dot count display
+        dotCountSlider.addEventListener('input', function() {
+            dotCountValue.textContent = this.value;
+            if (isRunning) {
+                // Adjust dot count while running
+                const currentCount = dots.length;
+                const targetCount = parseInt(this.value);
+                
+                if (targetCount > currentCount) {
+                    // Add more dots
+                    for (let i = currentCount; i < targetCount; i++) {
+                        dots.push({
+                            x: Math.random() * canvas.width,
+                            y: Math.random() * 100,
+                            vx: (Math.random() - 0.5) * 2,
+                            vy: (Math.random() - 0.5) * 2,
+                            radius: dotRadius,
+                            isCaught: false,
+                            caughtBy: null,
+                            inPassageway: false,
+                            passagewayProgress: 0
+                        });
+                    }
+                } else if (targetCount < currentCount) {
+                    // Remove excess dots (remove uncaptured ones first)
+                    dots = dots.filter(dot => dot.isCaught).concat(
+                        dots.filter(dot => !dot.isCaught).slice(0, targetCount - dots.filter(dot => dot.isCaught).length)
+                    );
+                }
+            }
+        });
+        
+        // Start simulation
+        startBtn.addEventListener('click', function() {
+            if (!isRunning) {
+                isRunning = true;
+                startTime = Date.now();
+                
+                // Initialize start times for mitts that haven't started yet
+                mitts.forEach(mitt => {
+                    if (mitt.startTime === null) {
+                        mitt.startTime = startTime;
+                    }
+                });
+                
+                animate();
+            }
+        });
+        
+        // Stop simulation
+        stopBtn.addEventListener('click', function() {
+            if (isRunning) {
+                isRunning = false;
+                if (animationId) {
+                    cancelAnimationFrame(animationId);
+                }
+                
+                // Calculate and display stats
+                displayStats();
+            }
+        });
+        
+        // Reset simulation
+        resetBtn.addEventListener('click', function() {
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+            }
+            isRunning = false;
+            initSimulation();
+            draw();
+        });
+        
+        // Display stats table
+        function displayStats() {
+            statsTable.style.display = 'table';
+            statsBody.innerHTML = '';
+            
+            mitts.forEach((mitt, index) => {
+                const row = document.createElement('tr');
+                
+                const mittCell = document.createElement('td');
+                mittCell.textContent = `Enzyme ${index + 1}`;
+                
+                const stickinessCell = document.createElement('td');
+                stickinessCell.textContent = mitt.stickiness.toFixed(2);
+                
+                const timeCell = document.createElement('td');
+                if (mitt.startTime) {
+                    const timeSurvived = (Date.now() - mitt.startTime) / 1000;
+                    timeCell.textContent = timeSurvived.toFixed(2);
+                    mitt.timeSurvived = timeSurvived;
+                } else {
+                    timeCell.textContent = "0.00";
+                }
+                
+                const dotsCell = document.createElement('td');
+                dotsCell.textContent = mitt.caughtDots;
+                
+                row.appendChild(mittCell);
+                row.appendChild(stickinessCell);
+                row.appendChild(timeCell);
+                row.appendChild(dotsCell);
+                
+                statsBody.appendChild(row);
+            });
+        }
+        
+        // Main animation loop
+        function animate() {
+            if (!isRunning) return;
+            
+            currentTime = (Date.now() - startTime) / 1000;
+            update();
+            draw();
+            animationId = requestAnimationFrame(animate);
+        }
+        
+        // Update simulation state
+        function update() {
+            // Update dots
+            dots.forEach(dot => {
+                if (!dot.isCaught && !dot.inPassageway) {
+                    // Move dot
+                    dot.x += dot.vx;
+                    dot.y += dot.vy;
+                    
+                    // Bounce off walls
+                    if (dot.x < dot.radius || dot.x > canvas.width - dot.radius) {
+                        dot.vx = -dot.vx;
+                    }
+                    if (dot.y < dot.radius) {
+                        dot.vy = -dot.vy;
+                    }
+                    
+                    // Check if dot is caught by a mitt
+                    mitts.forEach((mitt, index) => {
+                        if (!dot.isCaught && 
+                            dot.x > mitt.x && dot.x < mitt.x + mitt.width &&
+                            dot.y > mitt.y && dot.y < mitt.y + mitt.height) {
+                            
+                            // Probability of catching based on stickiness
+                            if (Math.random() < mitt.stickiness) {
+                                dot.isCaught = true;
+                                dot.caughtBy = index;
+                                dot.inPassageway = true;
+                                mitt.caughtDots++;
+                                
+                                // Update cell last fed time
+                                if (cells[index].isAlive) {
+                                    cells[index].lastFedTime = currentTime;
+                                }
+                            }
+                        }
+                    });
+                } else if (dot.inPassageway) {
+                    // Move dot through passageway
+                    const mittIndex = dot.caughtBy;
+                    const mitt = mitts[mittIndex];
+                    const cell = cells[mittIndex];
+                    
+                    // Progress based on stickiness (stickier = slower)
+                    dot.passagewayProgress += 0.02 / mitt.stickiness;
+                    
+                    if (dot.passagewayProgress >= 1) {
+                        // Dot reached the cell
+                        dot.inPassageway = false;
+                        
+                        // Respawn dot at top
+                        dot.x = Math.random() * canvas.width;
+                        dot.y = Math.random() * 50;
+                        dot.vx = (Math.random() - 0.5) * 2;
+                        dot.vy = (Math.random() - 0.5) * 2;
+                        dot.isCaught = false;
+                        dot.caughtBy = null;
+                        dot.passagewayProgress = 0;
+                    }
+                }
+            });
+            
+            // Update cell health
+            cells.forEach((cell, index) => {
+                if (cell.isAlive) {
+                    const timeSinceLastFed = currentTime - cell.lastFedTime;
+                    
+                    // Health decreases over time, but recovers when fed
+                    if (timeSinceLastFed < 2) {
+                        // Recently fed - health increases
+                        cell.health = Math.min(100, cell.health + 0.5);
+                    } else {
+                        // Not fed recently - health decreases
+                        cell.health = Math.max(0, cell.health - 0.2);
+                    }
+                    
+                    // Check if cell dies
+                    if (cell.health <= 0) {
+                        cell.isAlive = false;
+                    }
+                }
+            });
+        }
+        
+        // Draw everything
+        function draw() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw top section background
+            ctx.fillStyle = '#e8f4f8';
+            ctx.fillRect(0, 0, canvas.width, 150);
+            
+            // Draw dots
+            dots.forEach(dot => {
+                ctx.beginPath();
+                ctx.arc(dot.x, dot.y, dot.radius, 0, Math.PI * 2);
+                
+                if (dot.isCaught && dot.inPassageway) {
+                    // Dot in passageway - yellow
+                    ctx.fillStyle = '#ffeb3b';
+                } else if (dot.isCaught) {
+                    // Dot caught by mitt - orange
+                    ctx.fillStyle = '#ff9800';
+                } else {
+                    // Free dot - green
+                    ctx.fillStyle = '#4caf50';
+                }
+                
+                ctx.fill();
+            });
+            
+            // Draw mitts and passageways
+            mitts.forEach((mitt, index) => {
+                // Draw mitt
+                const stickinessColor = `hsl(${120 * (1 - mitt.stickiness)}, 70%, 50%)`;
+                ctx.fillStyle = stickinessColor;
+                ctx.fillRect(mitt.x, mitt.y, mitt.width, mitt.height);
+                
+                // Draw mitt outline
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(mitt.x, mitt.y, mitt.width, mitt.height);
+                
+                // Draw passageway
+                const passagewayY = mitt.y + mitt.height;
+                ctx.fillStyle = stickinessColor;
+                ctx.fillRect(mitt.x + mitt.width/2 - 10, passagewayY, 20, passagewayHeight);
+                
+                // Draw dots in passageway
+                dots.forEach(dot => {
+                    if (dot.caughtBy === index && dot.inPassageway) {
+                        const passagewayYPos = passagewayY + dot.passagewayProgress * passagewayHeight;
+                        ctx.beginPath();
+                        ctx.arc(mitt.x + mitt.width/2, passagewayYPos, dot.radius, 0, Math.PI * 2);
+                        ctx.fillStyle = '#ffeb3b';
+                        ctx.fill();
+                    }
+                });
+            });
+            
+            // Draw cells
+            cells.forEach(cell => {
+                ctx.beginPath();
+                ctx.arc(cell.x, cell.y, cell.radius, 0, Math.PI * 2);
+                
+                // Color based on health
+                if (!cell.isAlive) {
+                    ctx.fillStyle = '#000000'; // Dead - black
+                } else if (cell.health > 70) {
+                    ctx.fillStyle = '#4caf50'; // Healthy - green
+                } else if (cell.health > 30) {
+                    ctx.fillStyle = '#ffeb3b'; // Warning - yellow
+                } else {
+                    ctx.fillStyle = '#f44336'; // Danger - red
+                }
+                
+                ctx.fill();
+                
+                // Draw cell outline
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                // Draw health indicator (optional)
+                ctx.fillStyle = '#fff';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(Math.round(cell.health) + '%', cell.x, cell.y + 4);
+            });
+            
+            // Draw dividing line between top and bottom sections
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(0, 150);
+            ctx.lineTo(canvas.width, 150);
+            ctx.stroke();
+            
+            // Draw labels
+            ctx.fillStyle = '#333';
+            ctx.font = '14px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('Substrate Area', canvas.width/2, 20);
+            ctx.fillText('Enzyme Mitts (Increasing Stickiness →)', canvas.width/2, 130);
+            ctx.fillText('Cells', canvas.width/2, 500);
+        }
+        
+        // Initialize and draw first frame
+        initSimulation();
+        draw();
+    </script>
+</body>
+</html>
