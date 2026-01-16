@@ -101,6 +101,14 @@
         #dotCount {
             width: 200px;
         }
+        
+        .explanation {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 5px;
+            font-size: 14px;
+        }
     </style>
 </head>
 <body>
@@ -125,11 +133,21 @@
         
         <canvas id="simulationCanvas" width="800" height="600"></canvas>
         
+        <div class="explanation">
+            <h3>How Stickiness Works:</h3>
+            <p><strong>Stickiness = Catch Probability × Passageway Slowness</strong></p>
+            <p>• <strong>High Stickiness (Blue Mitts):</strong> 90% catch rate, but very slow metabolism (3x slower)</p>
+            <p>• <strong>Medium Stickiness:</strong> 50% catch rate, moderate metabolism speed</p>
+            <p>• <strong>Low Stickiness (Red Mitts):</strong> 10% catch rate, but fast metabolism (3x faster)</p>
+            <p>This represents the Michaelis-Menten tradeoff: stronger binding (high stickiness) means better substrate capture at low concentrations but slower catalytic turnover.</p>
+        </div>
+        
         <table id="statsTable" class="stats-table" style="display: none;">
             <thead>
                 <tr>
                     <th>Enzyme Mitt</th>
                     <th>Stickiness</th>
+                    <th>Catch Rate</th>
                     <th>Time Survived (s)</th>
                     <th>Dots Metabolized</th>
                 </tr>
@@ -161,6 +179,7 @@
         const passagewayHeight = 80;
         const cellRadius = 30;
         const dotRadius = 5;
+        const topSectionHeight = 150; // Dots should stay above this line
         
         // Simulation state
         let dots = [];
@@ -171,6 +190,40 @@
         let startTime = null;
         let currentTime = 0;
         
+        // Create texture gradient for mitts
+        function createMittTexture(stickiness) {
+            // Create a canvas for the texture pattern
+            const textureCanvas = document.createElement('canvas');
+            textureCanvas.width = 20;
+            textureCanvas.height = 20;
+            const textureCtx = textureCanvas.getContext('2d');
+            
+            // Blue gradient based on stickiness (darker blue = stickier)
+            const hue = 240 - (stickiness * 120); // Blue (240) to Blue-Cyan (120)
+            const saturation = 70 + (stickiness * 30); // More saturated for stickier mitts
+            const lightness = 50 - (stickiness * 10); // Darker for stickier mitts
+            
+            // Base color
+            textureCtx.fillStyle = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+            textureCtx.fillRect(0, 0, 20, 20);
+            
+            // Add texture pattern (diamond/weave pattern)
+            textureCtx.strokeStyle = `hsl(${hue}, ${saturation}%, ${lightness - 15}%)`;
+            textureCtx.lineWidth = 1;
+            
+            // Diamond pattern
+            for (let i = 0; i < 20; i += 5) {
+                for (let j = 0; j < 20; j += 5) {
+                    textureCtx.beginPath();
+                    textureCtx.moveTo(i, j);
+                    textureCtx.lineTo(i + 5, j + 5);
+                    textureCtx.stroke();
+                }
+            }
+            
+            return ctx.createPattern(textureCanvas, 'repeat');
+        }
+        
         // Initialize the simulation
         function initSimulation() {
             dots = [];
@@ -178,14 +231,14 @@
             cells = [];
             currentTime = 0;
             
-            // Create mitts with increasing stickiness (left to right)
+            // Create mitts with EXTREME differences in stickiness (left to right)
             const mittSpacing = (canvas.width - numMitts * mittWidth) / (numMitts + 1);
             for (let i = 0; i < numMitts; i++) {
                 const x = mittSpacing + i * (mittWidth + mittSpacing);
-                const y = 150; // Fixed Y position for mitts
+                const y = topSectionHeight; // Fixed Y position at the boundary
                 
-                // Stickiness increases from left to right (lower Km values)
-                const stickiness = 0.2 + (i * 0.2); // Range: 0.2 to 0.8
+                // EXTREME stickiness differences (0.1 to 0.9)
+                const stickiness = 0.1 + (i * 0.8 / (numMitts - 1));
                 
                 mitts.push({
                     x: x,
@@ -193,9 +246,12 @@
                     width: mittWidth,
                     height: mittHeight,
                     stickiness: stickiness,
+                    catchProbability: 0.1 + (stickiness * 0.8), // 10% to 90% catch rate
+                    passagewaySpeed: 0.02 / (0.5 + stickiness * 0.5), // Slower for stickier mitts
                     caughtDots: 0,
                     startTime: null,
-                    timeSurvived: 0
+                    timeSurvived: 0,
+                    texture: createMittTexture(stickiness)
                 });
                 
                 // Create corresponding cells beneath each mitt
@@ -223,9 +279,9 @@
             for (let i = 0; i < count; i++) {
                 dots.push({
                     x: Math.random() * canvas.width,
-                    y: Math.random() * 100, // Top section
-                    vx: (Math.random() - 0.5) * 2,
-                    vy: (Math.random() - 0.5) * 2,
+                    y: Math.random() * (topSectionHeight - 20) + 10, // Only in top section
+                    vx: (Math.random() - 0.5) * 3,
+                    vy: (Math.random() - 0.5) * 3,
                     radius: dotRadius,
                     isCaught: false,
                     caughtBy: null,
@@ -239,7 +295,6 @@
         dotCountSlider.addEventListener('input', function() {
             dotCountValue.textContent = this.value;
             if (isRunning) {
-                // Adjust dot count while running
                 const currentCount = dots.length;
                 const targetCount = parseInt(this.value);
                 
@@ -248,9 +303,9 @@
                     for (let i = currentCount; i < targetCount; i++) {
                         dots.push({
                             x: Math.random() * canvas.width,
-                            y: Math.random() * 100,
-                            vx: (Math.random() - 0.5) * 2,
-                            vy: (Math.random() - 0.5) * 2,
+                            y: Math.random() * (topSectionHeight - 20) + 10,
+                            vx: (Math.random() - 0.5) * 3,
+                            vy: (Math.random() - 0.5) * 3,
                             radius: dotRadius,
                             isCaught: false,
                             caughtBy: null,
@@ -259,9 +314,10 @@
                         });
                     }
                 } else if (targetCount < currentCount) {
-                    // Remove excess dots (remove uncaptured ones first)
-                    dots = dots.filter(dot => dot.isCaught).concat(
-                        dots.filter(dot => !dot.isCaught).slice(0, targetCount - dots.filter(dot => dot.isCaught).length)
+                    // Remove excess dots
+                    dots = dots.filter(dot => dot.isCaught || dot.inPassageway).concat(
+                        dots.filter(dot => !dot.isCaught && !dot.inPassageway)
+                            .slice(0, Math.max(0, targetCount - dots.filter(dot => dot.isCaught || dot.inPassageway).length))
                     );
                 }
             }
@@ -321,6 +377,9 @@
                 const stickinessCell = document.createElement('td');
                 stickinessCell.textContent = mitt.stickiness.toFixed(2);
                 
+                const catchRateCell = document.createElement('td');
+                catchRateCell.textContent = `${(mitt.catchProbability * 100).toFixed(0)}%`;
+                
                 const timeCell = document.createElement('td');
                 if (mitt.startTime) {
                     const timeSurvived = (Date.now() - mitt.startTime) / 1000;
@@ -335,6 +394,7 @@
                 
                 row.appendChild(mittCell);
                 row.appendChild(stickinessCell);
+                row.appendChild(catchRateCell);
                 row.appendChild(timeCell);
                 row.appendChild(dotsCell);
                 
@@ -354,29 +414,39 @@
         
         // Update simulation state
         function update() {
-            // Update dots
+            // Update dots - KEEP THEM IN TOP SECTION
             dots.forEach(dot => {
                 if (!dot.isCaught && !dot.inPassageway) {
                     // Move dot
                     dot.x += dot.vx;
                     dot.y += dot.vy;
                     
-                    // Bounce off walls
+                    // Boundary checks - KEEP IN TOP SECTION
                     if (dot.x < dot.radius || dot.x > canvas.width - dot.radius) {
                         dot.vx = -dot.vx;
+                        dot.x = Math.max(dot.radius, Math.min(canvas.width - dot.radius, dot.x));
                     }
+                    
+                    // IMPORTANT: Keep dots in top section!
                     if (dot.y < dot.radius) {
                         dot.vy = -dot.vy;
+                        dot.y = dot.radius;
+                    }
+                    
+                    // Prevent dots from going below the mitt line unless caught
+                    if (dot.y > topSectionHeight - dot.radius) {
+                        dot.vy = -Math.abs(dot.vy); // Bounce upward
+                        dot.y = topSectionHeight - dot.radius;
                     }
                     
                     // Check if dot is caught by a mitt
                     mitts.forEach((mitt, index) => {
-                        if (!dot.isCaught && 
+                        if (!dot.isCaught && !dot.inPassageway &&
                             dot.x > mitt.x && dot.x < mitt.x + mitt.width &&
-                            dot.y > mitt.y && dot.y < mitt.y + mitt.height) {
+                            dot.y + dot.radius > mitt.y && dot.y < mitt.y + mitt.height) {
                             
-                            // Probability of catching based on stickiness
-                            if (Math.random() < mitt.stickiness) {
+                            // Probability of catching based on EXTREME differences
+                            if (Math.random() < mitt.catchProbability) {
                                 dot.isCaught = true;
                                 dot.caughtBy = index;
                                 dot.inPassageway = true;
@@ -390,13 +460,12 @@
                         }
                     });
                 } else if (dot.inPassageway) {
-                    // Move dot through passageway
+                    // Move dot through passageway - SPEED VARIES DRAMATICALLY
                     const mittIndex = dot.caughtBy;
                     const mitt = mitts[mittIndex];
-                    const cell = cells[mittIndex];
                     
-                    // Progress based on stickiness (stickier = slower)
-                    dot.passagewayProgress += 0.02 / mitt.stickiness;
+                    // Progress based on extreme speed differences
+                    dot.passagewayProgress += mitt.passagewaySpeed;
                     
                     if (dot.passagewayProgress >= 1) {
                         // Dot reached the cell
@@ -404,9 +473,9 @@
                         
                         // Respawn dot at top
                         dot.x = Math.random() * canvas.width;
-                        dot.y = Math.random() * 50;
-                        dot.vx = (Math.random() - 0.5) * 2;
-                        dot.vy = (Math.random() - 0.5) * 2;
+                        dot.y = Math.random() * (topSectionHeight - 40) + 20;
+                        dot.vx = (Math.random() - 0.5) * 3;
+                        dot.vy = (Math.random() - 0.5) * 3;
                         dot.isCaught = false;
                         dot.caughtBy = null;
                         dot.passagewayProgress = 0;
@@ -419,13 +488,15 @@
                 if (cell.isAlive) {
                     const timeSinceLastFed = currentTime - cell.lastFedTime;
                     
-                    // Health decreases over time, but recovers when fed
-                    if (timeSinceLastFed < 2) {
-                        // Recently fed - health increases
-                        cell.health = Math.min(100, cell.health + 0.5);
+                    // Health decreases faster for cells with slower metabolism
+                    const healthDecayRate = mitts[index].passagewaySpeed * 10; // Faster decay for slower enzymes
+                    
+                    if (timeSinceLastFed < 1.5) {
+                        // Recently fed - health increases quickly
+                        cell.health = Math.min(100, cell.health + 1);
                     } else {
                         // Not fed recently - health decreases
-                        cell.health = Math.max(0, cell.health - 0.2);
+                        cell.health = Math.max(0, cell.health - healthDecayRate);
                     }
                     
                     // Check if cell dies
@@ -443,7 +514,15 @@
             
             // Draw top section background
             ctx.fillStyle = '#e8f4f8';
-            ctx.fillRect(0, 0, canvas.width, 150);
+            ctx.fillRect(0, 0, canvas.width, topSectionHeight);
+            
+            // Draw dividing line between top and bottom sections
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(0, topSectionHeight);
+            ctx.lineTo(canvas.width, topSectionHeight);
+            ctx.stroke();
             
             // Draw dots
             dots.forEach(dot => {
@@ -464,11 +543,10 @@
                 ctx.fill();
             });
             
-            // Draw mitts and passageways
+            // Draw mitts and passageways with texture gradient
             mitts.forEach((mitt, index) => {
-                // Draw mitt
-                const stickinessColor = `hsl(${120 * (1 - mitt.stickiness)}, 70%, 50%)`;
-                ctx.fillStyle = stickinessColor;
+                // Draw mitt with texture
+                ctx.fillStyle = mitt.texture;
                 ctx.fillRect(mitt.x, mitt.y, mitt.width, mitt.height);
                 
                 // Draw mitt outline
@@ -476,24 +554,39 @@
                 ctx.lineWidth = 2;
                 ctx.strokeRect(mitt.x, mitt.y, mitt.width, mitt.height);
                 
-                // Draw passageway
-                const passagewayY = mitt.y + mitt.height;
-                ctx.fillStyle = stickinessColor;
-                ctx.fillRect(mitt.x + mitt.width/2 - 10, passagewayY, 20, passagewayHeight);
+                // Draw passageway with gradient matching the mitt
+                const gradient = ctx.createLinearGradient(
+                    mitt.x + mitt.width/2 - 10, mitt.y + mitt.height,
+                    mitt.x + mitt.width/2 - 10, mitt.y + mitt.height + passagewayHeight
+                );
+                
+                const hue = 240 - (mitt.stickiness * 120);
+                const saturation = 70 + (mitt.stickiness * 30);
+                gradient.addColorStop(0, `hsl(${hue}, ${saturation}%, 50%)`);
+                gradient.addColorStop(1, `hsl(${hue}, ${saturation}%, 30%)`);
+                
+                ctx.fillStyle = gradient;
+                ctx.fillRect(mitt.x + mitt.width/2 - 10, mitt.y + mitt.height, 20, passagewayHeight);
                 
                 // Draw dots in passageway
                 dots.forEach(dot => {
                     if (dot.caughtBy === index && dot.inPassageway) {
-                        const passagewayYPos = passagewayY + dot.passagewayProgress * passagewayHeight;
+                        const passagewayYPos = mitt.y + mitt.height + dot.passagewayProgress * passagewayHeight;
                         ctx.beginPath();
                         ctx.arc(mitt.x + mitt.width/2, passagewayYPos, dot.radius, 0, Math.PI * 2);
                         ctx.fillStyle = '#ffeb3b';
                         ctx.fill();
                     }
                 });
+                
+                // Draw stickiness label
+                ctx.fillStyle = '#333';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(`${(mitt.catchProbability * 100).toFixed(0)}%`, mitt.x + mitt.width/2, mitt.y - 5);
             });
             
-            // Draw cells
+            // Draw cells with health-based colors
             cells.forEach(cell => {
                 ctx.beginPath();
                 ctx.arc(cell.x, cell.y, cell.radius, 0, Math.PI * 2);
@@ -516,27 +609,19 @@
                 ctx.lineWidth = 2;
                 ctx.stroke();
                 
-                // Draw health indicator (optional)
+                // Draw health indicator
                 ctx.fillStyle = '#fff';
                 ctx.font = '12px Arial';
                 ctx.textAlign = 'center';
                 ctx.fillText(Math.round(cell.health) + '%', cell.x, cell.y + 4);
             });
             
-            // Draw dividing line between top and bottom sections
-            ctx.strokeStyle = '#333';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(0, 150);
-            ctx.lineTo(canvas.width, 150);
-            ctx.stroke();
-            
             // Draw labels
             ctx.fillStyle = '#333';
             ctx.font = '14px Arial';
             ctx.textAlign = 'center';
-            ctx.fillText('Substrate Area', canvas.width/2, 20);
-            ctx.fillText('Enzyme Mitts (Increasing Stickiness →)', canvas.width/2, 130);
+            ctx.fillText('Substrate Area (Dots stay here unless caught)', canvas.width/2, 20);
+            ctx.fillText('Enzyme Mitts (Extreme stickiness gradient →)', canvas.width/2, topSectionHeight - 10);
             ctx.fillText('Cells', canvas.width/2, 500);
         }
         
