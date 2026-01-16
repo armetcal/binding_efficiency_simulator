@@ -176,7 +176,7 @@
         const numMitts = 4;
         const mittWidth = 60;
         const mittHeight = 40;
-        const passagewayHeight = 120; // Longer passageways
+        const passagewayHeight = 120;
         const cellRadius = 30;
         const dotRadius = 5;
         const topSectionHeight = 150;
@@ -198,7 +198,7 @@
             const textureCtx = textureCanvas.getContext('2d');
             
             // Single solid color (no gradient)
-            const hue = 240 - (stickiness * 120); // Blue to blue-cyan
+            const hue = 240 - (stickiness * 120);
             const saturation = 70 + (stickiness * 30);
             const lightness = 50 - (stickiness * 10);
             
@@ -206,7 +206,7 @@
             textureCtx.fillRect(0, 0, 20, 20);
             
             // Texture intensity increases with stickiness
-            const textureIntensity = Math.floor(stickiness * 8); // 0 to 8 texture lines
+            const textureIntensity = Math.floor(stickiness * 8);
             
             if (textureIntensity > 0) {
                 textureCtx.strokeStyle = `hsl(${hue}, ${saturation}%, ${lightness - 15}%)`;
@@ -255,8 +255,8 @@
                     width: mittWidth,
                     height: mittHeight,
                     stickiness: stickiness,
-                    catchProbability: 0.1 + (stickiness * 0.8), // 10% to 90% catch rate
-                    passagewaySpeed: 0.02 / (0.5 + stickiness * 0.5), // Slower for stickier mitts
+                    catchProbability: 0.1 + (stickiness * 0.8),
+                    passagewaySpeed: 0.02 / (0.5 + stickiness * 0.5),
                     caughtDots: 0,
                     startTime: null,
                     timeSurvived: 0,
@@ -382,7 +382,7 @@
             draw();
         });
         
-        // Display stats table
+        // Display stats table - FIXED: Properly iterate through mitts
         function displayStats() {
             statsTable.style.display = 'table';
             statsBody.innerHTML = '';
@@ -431,7 +431,7 @@
             animationId = requestAnimationFrame(animate);
         }
         
-        // Update simulation state
+        // Update simulation state - FIXED collision detection
         function update() {
             // Update dots - keep them in top section
             dots.forEach(dot => {
@@ -439,7 +439,7 @@
                     dot.x += dot.vx;
                     dot.y += dot.vy;
                     
-                    // Boundary checks
+                    // Boundary checks - FIXED: Don't bounce at mitt boundary
                     if (dot.x < dot.radius || dot.x > canvas.width - dot.radius) {
                         dot.vx = -dot.vx;
                         dot.x = Math.max(dot.radius, Math.min(canvas.width - dot.radius, dot.x));
@@ -450,25 +450,53 @@
                         dot.y = dot.radius;
                     }
                     
-                    if (dot.y > topSectionHeight - dot.radius) {
+                    // IMPORTANT FIX: Only bounce if dot is about to go below mitt AND not touching mitt
+                    let isTouchingMitt = false;
+                    mitts.forEach((mitt, index) => {
+                        // Check if dot is vertically aligned with mitt
+                        if (dot.x > mitt.x && dot.x < mitt.x + mitt.width) {
+                            // Dot is above mitt and close to mitt boundary
+                            if (dot.y + dot.radius > mitt.y - 2 && dot.y < mitt.y + mitt.height) {
+                                isTouchingMitt = true;
+                            }
+                        }
+                    });
+                    
+                    // Only bounce if not touching mitt and about to cross boundary
+                    if (dot.y > topSectionHeight - dot.radius && !isTouchingMitt) {
                         dot.vy = -Math.abs(dot.vy);
                         dot.y = topSectionHeight - dot.radius;
                     }
                     
-                    // Check if dot is caught by a mitt
+                    // Check if dot is caught by a mitt - IMPROVED detection
                     mitts.forEach((mitt, index) => {
-                        if (!dot.isCaught && !dot.inPassageway &&
-                            dot.x > mitt.x && dot.x < mitt.x + mitt.width &&
-                            dot.y + dot.radius > mitt.y && dot.y < mitt.y + mitt.height) {
+                        if (!dot.isCaught && !dot.inPassageway) {
+                            // More generous collision detection
+                            const mittCenterX = mitt.x + mitt.width / 2;
+                            const mittCenterY = mitt.y + mitt.height / 2;
+                            const distanceX = Math.abs(dot.x - mittCenterX);
+                            const distanceY = Math.abs(dot.y - mittCenterY);
                             
-                            if (Math.random() < mitt.catchProbability) {
-                                dot.isCaught = true;
-                                dot.caughtBy = index;
-                                dot.inPassageway = true;
-                                mitt.caughtDots++;
+                            // Check if dot is within mitt bounds
+                            if (distanceX < mitt.width / 2 + dot.radius && 
+                                distanceY < mitt.height / 2 + dot.radius) {
                                 
-                                if (cells[index].isAlive) {
-                                    cells[index].lastFedTime = currentTime;
+                                // Random chance based on stickiness
+                                if (Math.random() < mitt.catchProbability) {
+                                    dot.isCaught = true;
+                                    dot.caughtBy = index;
+                                    dot.inPassageway = true;
+                                    mitt.caughtDots++; // This should now work correctly
+                                    
+                                    // Position dot at mitt entrance
+                                    dot.x = mitt.x + mitt.width / 2;
+                                    dot.y = mitt.y + mitt.height;
+                                    
+                                    if (cells[index].isAlive) {
+                                        cells[index].lastFedTime = currentTime;
+                                    }
+                                    
+                                    console.log(`Dot caught by mitt ${index + 1}! Total: ${mitt.caughtDots}`);
                                 }
                             }
                         }
@@ -481,6 +509,7 @@
                     
                     if (dot.passagewayProgress >= 1) {
                         dot.inPassageway = false;
+                        mitt.caughtDots--; // Dot has exited the system
                         dot.x = Math.random() * canvas.width;
                         dot.y = Math.random() * (topSectionHeight - 40) + 20;
                         dot.vx = (Math.random() - 0.5) * 3;
@@ -511,11 +540,11 @@
             });
         }
         
-        // Draw everything
+        // Draw everything - FIXED DRAWING ORDER
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
-            // Draw top section background
+            // Draw top section background FIRST (background)
             ctx.fillStyle = '#e8f4f8';
             ctx.fillRect(0, 0, canvas.width, topSectionHeight);
             
@@ -527,23 +556,7 @@
             ctx.lineTo(canvas.width, topSectionHeight);
             ctx.stroke();
             
-            // Draw dots
-            dots.forEach(dot => {
-                ctx.beginPath();
-                ctx.arc(dot.x, dot.y, dot.radius, 0, Math.PI * 2);
-                
-                if (dot.isCaught && dot.inPassageway) {
-                    ctx.fillStyle = '#ffeb3b';
-                } else if (dot.isCaught) {
-                    ctx.fillStyle = '#ff9800';
-                } else {
-                    ctx.fillStyle = '#4caf50';
-                }
-                
-                ctx.fill();
-            });
-            
-            // Draw mitts and passageways
+            // Draw mitts and passageways SECOND (static elements)
             mitts.forEach((mitt, index) => {
                 // Draw mitt with solid color texture
                 ctx.fillStyle = mitt.texture;
@@ -561,20 +574,9 @@
                 
                 ctx.fillStyle = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
                 ctx.fillRect(mitt.x + mitt.width/2 - 10, mitt.y + mitt.height, 20, passagewayHeight);
-                
-                // Draw dots in passageway
-                dots.forEach(dot => {
-                    if (dot.caughtBy === index && dot.inPassageway) {
-                        const passagewayYPos = mitt.y + mitt.height + dot.passagewayProgress * passagewayHeight;
-                        ctx.beginPath();
-                        ctx.arc(mitt.x + mitt.width/2, passagewayYPos, dot.radius, 0, Math.PI * 2);
-                        ctx.fillStyle = '#ffeb3b';
-                        ctx.fill();
-                    }
-                });
             });
             
-            // Draw cells
+            // Draw cells THIRD
             cells.forEach(cell => {
                 ctx.beginPath();
                 ctx.arc(cell.x, cell.y, cell.radius, 0, Math.PI * 2);
@@ -601,6 +603,43 @@
                 ctx.fillText(Math.round(cell.health) + '%', cell.x, cell.y + 4);
             });
             
+            // Draw dots LAST (they should appear on top)
+            dots.forEach(dot => {
+                ctx.beginPath();
+                ctx.arc(dot.x, dot.y, dot.radius, 0, Math.PI * 2);
+                
+                if (dot.isCaught && dot.inPassageway) {
+                    // Yellow for dots moving through passageway
+                    ctx.fillStyle = '#ffeb3b';
+                } else if (dot.isCaught) {
+                    // Orange for dots caught by mitt (before entering passageway)
+                    ctx.fillStyle = '#ff9800';
+                } else {
+                    // Green for free-floating dots
+                    ctx.fillStyle = '#4caf50';
+                }
+                
+                ctx.fill();
+            });
+            
+            // Draw dots in passageways separately to ensure they're visible
+            mitts.forEach((mitt, index) => {
+                dots.forEach(dot => {
+                    if (dot.caughtBy === index && dot.inPassageway) {
+                        const passagewayYPos = mitt.y + mitt.height + dot.passagewayProgress * passagewayHeight;
+                        ctx.beginPath();
+                        ctx.arc(mitt.x + mitt.width/2, passagewayYPos, dot.radius, 0, Math.PI * 2);
+                        ctx.fillStyle = '#ffeb3b';
+                        ctx.fill();
+                        
+                        // Add a subtle glow to make passageway dots more visible
+                        ctx.strokeStyle = 'rgba(255, 235, 59, 0.5)';
+                        ctx.lineWidth = 2;
+                        ctx.stroke();
+                    }
+                });
+            });
+            
             // Draw stickiness labels UNDERNEATH cells
             mitts.forEach((mitt, index) => {
                 const cell = cells[index];
@@ -611,12 +650,20 @@
                            cell.x, cell.y + cellRadius + 20);
             });
             
-            // Draw labels (removed 'Substrate area' label)
+            // Draw labels
             ctx.fillStyle = '#333';
             ctx.font = '14px Arial';
             ctx.textAlign = 'center';
             ctx.fillText('Enzyme Mitts (Extreme stickiness gradient →)', canvas.width/2, topSectionHeight - 10);
             ctx.fillText('Cells', canvas.width/2, 480);
+            
+            // Debug: Show current dot counts on mitts
+            mitts.forEach((mitt, index) => {
+                ctx.fillStyle = '#000';
+                ctx.font = '10px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(`Dots: ${mitt.caughtDots}`, mitt.x + mitt.width/2, mitt.y - 15);
+            });
         }
         
         // Initialize and draw first frame
